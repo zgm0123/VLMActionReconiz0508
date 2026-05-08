@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>MiniCPM-V-4.5 视频行为定位</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #1a1a2e; color: #eee; }
+        #app { display: flex; height: 100vh; }
+
+        /* 左列 - 视频列表 */
+        .col-left { width: 300px; background: #16213e; border-right: 1px solid #0f3460; overflow-y: auto; flex-shrink: 0; }
+        .col-left h2 { padding: 14px; font-size: 15px; border-bottom: 1px solid #0f3460; }
+        .video-item { padding: 10px 14px; cursor: pointer; border-bottom: 1px solid #0f3460; transition: background 0.2s; display: flex; align-items: center; gap: 8px; }
+        .video-item:hover { background: #0f3460; }
+        .video-item.active { background: #e94560; }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+        .status-dot.inferred { background: #4ecca3; }
+        .status-dot.pending { background: #f4d03f; }
+        .video-name { font-size: 13px; flex: 1; min-width: 0; word-break: break-all; line-height: 1.3; }
+        .video-status { font-size: 11px; color: #888; flex-shrink: 0; }
+
+        /* 中列 - 视频 + 控制台 */
+        .col-center { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+        .video-area { height: 60%; display: flex; align-items: center; justify-content: center; background: #0f0f23; padding: 16px; }
+        video { max-width: 100%; max-height: 100%; border-radius: 8px; }
+        .no-video { color: #666; font-size: 16px; }
+
+        .console-area { height: 40%; background: #0a0a1a; border-top: 1px solid #0f3460; padding: 12px; overflow-y: auto; font-family: 'Consolas', 'Monaco', monospace; font-size: 12px; line-height: 1.6; }
+        .console-area h3 { font-size: 12px; color: #e94560; margin-bottom: 8px; font-family: sans-serif; }
+        .console-line { color: #aaa; white-space: pre-wrap; word-break: break-all; }
+        .console-line.info { color: #4ecca3; }
+        .console-line.error { color: #e94560; }
+        .console-line.warn { color: #f4d03f; }
+
+        /* 右列 - 标签 */
+        .col-right { width: 320px; background: #16213e; border-left: 1px solid #0f3460; overflow-y: auto; flex-shrink: 0; }
+        .col-right h3 { padding: 14px; font-size: 15px; border-bottom: 1px solid #0f3460; color: #e94560; }
+        .labels-content { padding: 14px; }
+        .label-list { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+        .label-tag { padding: 6px 12px; border-radius: 16px; background: #0f3460; cursor: pointer; font-size: 13px; transition: all 0.2s; border: 2px solid transparent; }
+        .label-tag:hover { background: #1a4a7a; }
+        .label-tag.selected { border-color: #e94560; background: #e94560; }
+        .label-tag.result-found { border-color: #4ecca3; background: #1a3a2e; }
+        .remove-btn { margin-left: 6px; color: #e94560; cursor: pointer; font-weight: bold; display: none; }
+        .label-tag:hover .remove-btn { display: inline; }
+        .btn { width: 100%; padding: 10px; border: none; border-radius: 6px; background: #e94560; color: white; cursor: pointer; font-size: 14px; }
+        .btn:hover { background: #c73e54; }
+        .btn:disabled { background: #555; cursor: not-allowed; }
+        .results { margin-top: 16px; }
+        .result-group { margin-bottom: 12px; }
+        .result-group-title { padding: 8px 12px; background: #0f3460; border-radius: 6px 6px 0 0; font-size: 14px; font-weight: bold; color: #e94560; border-bottom: 1px solid #1a4a7a; }
+        .result-item { padding: 8px 12px; background: #16213e; border-radius: 0; font-size: 13px; border-bottom: 1px solid #0f3460; }
+        .result-item:last-child { border-bottom: none; border-radius: 0 0 6px 6px; }
+        .result-group .result-item:first-child { border-radius: 0; }
+        .result-item .time { color: #4ecca3; font-weight: bold; }
+        .message { margin-top: 12px; padding: 10px; border-radius: 6px; font-size: 13px; }
+        .message.loading { background: #3a3a00; color: #f4d03f; }
+        .message.error { background: #3a0010; color: #e94560; }
+        .message.success { background: #003a10; color: #4ecca3; }
+
+        /* 进度条 */
+        .progress-container { margin-top: 12px; }
+        .progress-bar-bg { width: 100%; height: 20px; background: #0f3460; border-radius: 10px; overflow: hidden; }
+        .progress-bar-fill { height: 100%; background: #e94560; transition: width 0.3s ease; display: flex; align-items: center; justify-content: center; font-size: 11px; color: white; }
+        .progress-label { font-size: 12px; color: #aaa; margin-top: 4px; text-align: center; }
+
+        .segment-badge {
+            display: inline-block;
+            background: #0f3460;
+            color: #4ecca3;
+            padding: 1px 6px;
+            border-radius: 4px;
+            font-size: 11px;
+            margin-left: 6px;
+        }
+        .detail-toggle {
+            margin-top: 12px;
+            padding: 8px 12px;
+            background: #0f3460;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            text-align: center;
+            transition: background 0.2s;
+        }
+        .detail-toggle:hover { background: #1a4a7a; }
+        .detail-panel {
+            margin-top: 8px;
+            max-height: 400px;
+            overflow-y: auto;
+            background: #0a0a1a;
+            border-radius: 6px;
+            border: 1px solid #0f3460;
+        }
+        .detail-segment {
+            padding: 10px 12px;
+            border-bottom: 1px solid #0f3460;
+        }
+        .detail-segment:last-child { border-bottom: none; }
+        .detail-segment-title {
+            font-size: 12px;
+            color: #e94560;
+            font-weight: bold;
+            margin-bottom: 6px;
+        }
+        .detail-content {
+            font-size: 12px;
+            line-height: 1.6;
+            color: #aaa;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        .detail-content .step { color: #4ecca3; font-weight: bold; }
+    </style>
+</head>
+<body>
+<div id="app">
+    <!-- 左列：视频列表 -->
+    <div class="col-left">
+        <h2>视频列表</h2>
+        <div
+            v-for="v in videos"
+            :key="v.name"
+            class="video-item"
+            :class="{ active: currentVideo === v.name }"
+            @click="selectVideo(v)"
+        >
+            <div class="status-dot" :class="v.inferred ? 'inferred' : 'pending'"></div>
+            <div class="video-name">{{ v.name.split('/').pop() }}</div>
+            <div class="video-status">{{ v.inferred ? '已推理' : '未推理' }}</div>
+        </div>
+    </div>
+
+    <!-- 中列：视频 + 控制台 -->
+    <div class="col-center">
+        <div class="video-area">
+            <video v-if="currentVideo" :src="videoUrl" controls @error="videoError = true"></video>
+            <div v-if="videoError" class="no-video" style="color: #e94560;">
+                视频加载失败<br>
+                URL: {{ videoUrl }}<br>
+                <a :href="videoUrl" target="_blank" style="color: #4ecca3;">直接下载视频</a>
+            </div>
+            <div v-if="!currentVideo" class="no-video">请选择左侧视频</div>
+        </div>
+        <div class="console-area">
+            <h3>推理日志</h3>
+            <div v-if="consoleLines.length === 0" class="console-line">等待推理...</div>
+            <div v-for="(line, idx) in consoleLines" :key="idx" class="console-line" :class="line.type">{{ line.text }}</div>
+        </div>
+    </div>
+
+    <!-- 右列：标签 -->
+    <div class="col-right">
+        <h3>行为标签</h3>
+        <div class="labels-content">
+            <div class="label-list">
+                <div
+                    v-for="label in labels"
+                    :key="label"
+                    class="label-tag"
+                    :class="{ selected: selectedLabels.includes(label), 'result-found': hasResult(label) }"
+                    @click="toggleLabel(label)"
+                >
+                    {{ label }}
+                    <span v-if="hasResult(label)"> ✓</span>
+                    <span class="remove-btn" @click.stop="removeLabel(label)" title="删除标签">×</span>
+                </div>
+            </div>
+            <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+                <input
+                    v-model="newLabel"
+                    @keyup.enter="addLabel"
+                    placeholder="输入新标签，按回车添加"
+                    style="flex: 1; padding: 8px 12px; border-radius: 6px; border: 1px solid #0f3460; background: #0a0a1a; color: #eee; font-size: 13px;"
+                >
+                <button class="btn" style="width: auto; padding: 8px 16px;" @click="addLabel">添加</button>
+            </div>
+            <button class="btn" :disabled="!currentVideo || inferring" @click="runInference">
+                {{ inferring ? '推理中...' : '开始推理（全选标签）' }}
+            </button>
+
+            <div class="progress-container" v-if="inferring || progress > 0">
+                <div class="progress-bar-bg">
+                    <div class="progress-bar-fill" :style="{ width: progress + '%' }">{{ progress }}%</div>
+                </div>
+                <div class="progress-label">{{ progressLabel }}</div>
+            </div>
+
+            <div class="results" v-if="results.length > 0">
+                <div v-for="(segments, action) in groupedResults" :key="action" class="result-group">
+                    <div class="result-group-title">{{ action }}</div>
+                    <div v-if="segments.length === 0" class="result-item">未检测到</div>
+                    <div
+                        v-for="(r, idx) in segments"
+                        :key="r.action + (r.segment_id || '')"
+                        class="result-item"
+                    >
+                        <span>片段{{ idx + 1 }}: <span class="time">{{ r.start_time }}s ~ {{ r.end_time }}s</span> ({{ r.duration }}s)<span class="segment-badge">段{{ r.segment_id }}</span></span>
+                    </div>
+                </div>
+            </div>
+
+            <div v-if="message" class="message" :class="messageType">{{ message }}</div>
+
+            <div v-if="rawOutputs" class="detail-toggle" @click="showDetails = !showDetails">
+                {{ showDetails ? '收起推理详情 ▲' : '查看推理详情 ▼' }}
+                <span style="color:#888;font-size:11px;">({{ rawOutputs.length }} chars)</span>
+            </div>
+            <div v-show="showDetails && rawOutputs" class="detail-panel">
+                <div v-for="(seg, idx) in parsedSegments" :key="idx" class="detail-segment">
+                    <div class="detail-segment-title">{{ seg.title }}</div>
+                    <div class="detail-content" v-html="seg.html"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+const { createApp } = Vue;
+
+createApp({
+    data() {
+        return {
+            videos: [],
+            labels: [],
+            currentVideo: null,
+            currentVideoName: null,
+            videoError: false,
+            selectedLabels: [],
+            results: [],
+            rawOutputs: '',
+            showDetails: false,
+            inferring: false,
+            message: '',
+            messageType: '',
+            consoleLines: [],
+            newLabel: '',
+            progress: 0,
+            progressLabel: '',
+        };
+    },
+    computed: {
+        videoUrl() {
+            return this.currentVideo ? `/video/${this.currentVideo}` : '';
+        },
+        groupedResults() {
+            const groups = {};
+            for (const r of this.results) {
+                if (!groups[r.action]) {
+                    groups[r.action] = [];
+                }
+                if (r.status === 'detected') {
+                    groups[r.action].push(r);
+                }
+            }
+            for (const g of Object.values(groups)) {
+                g.sort((a, b) => a.start_time - b.start_time);
+            }
+            return groups;
+        },
+        parsedSegments() {
+            if (!this.rawOutputs) return [];
+            const segments = [];
+            const text = this.rawOutputs;
+            const marker = '=== 段 ';
+            let pos = text.indexOf(marker);
+            while (pos !== -1) {
+                const nextPos = text.indexOf(marker, pos + marker.length);
+                const chunk = nextPos === -1 ? text.substring(pos) : text.substring(pos, nextPos);
+                const m = chunk.match(/===\s*段\s*\d+\s*\(([^)]+)\)\s*===\n?([\s\S]*)/);
+                if (m) {
+                    let content = m[2].trim();
+                    content = content
+                        .replace(/(【步骤[123].*?】)/g, '<span class="step">$1</span>')
+                        .replace(/\n/g, '<br>');
+                    segments.push({ title: `段 ${m[1]}`, html: content });
+                }
+                pos = nextPos;
+            }
+            return segments;
+        }
+    },
+    mounted() {
+        this.fetchVideos();
+        this.fetchLabels();
+    },
+    methods: {
+        async fetchVideos() {
+            const res = await fetch('/api/videos');
+            this.videos = await res.json();
+        },
+        async fetchLabels() {
+            const res = await fetch('/api/labels');
+            this.labels = await res.json();
+        },
+        async selectVideo(v) {
+            this.currentVideo = v.name;
+            this.currentVideoName = v.video_name;
+            this.videoError = false;
+            this.results = [];
+            this.rawOutputs = '';
+            this.showDetails = false;
+            this.selectedLabels = [];
+            this.message = '';
+            this.consoleLines = [];
+            if (v.inferred) {
+                this.message = '加载已推理结果...';
+                this.messageType = 'loading';
+                await this.loadResults(v.video_name);
+                this.message = '已推理结果加载完成';
+                this.messageType = 'success';
+            }
+        },
+        async loadResults(videoName) {
+            const res = await fetch(`/api/results/${videoName}`);
+            const data = await res.json();
+            this.results = data.actions || [];
+            this.rawOutputs = data.raw_outputs || '';
+        },
+        hasResult(label) {
+            return this.results.some(r => r.action === label && r.status === 'detected');
+        },
+        toggleLabel(label) {
+            const idx = this.selectedLabels.indexOf(label);
+            if (idx >= 0) {
+                this.selectedLabels.splice(idx, 1);
+            } else {
+                this.selectedLabels.push(label);
+            }
+        },
+        removeLabel(label) {
+            const idx = this.labels.indexOf(label);
+            if (idx >= 0) this.labels.splice(idx, 1);
+            const selIdx = this.selectedLabels.indexOf(label);
+            if (selIdx >= 0) this.selectedLabels.splice(selIdx, 1);
+        },
+        addLabel() {
+            const label = this.newLabel.trim();
+            if (label && !this.labels.includes(label)) {
+                this.labels.push(label);
+                this.newLabel = '';
+            }
+        },
+        addConsole(text, type = '') {
+            this.consoleLines.push({ text, type });
+        },
+        async runInference() {
+            this.inferring = true;
+            this.message = '正在推理，请稍候...';
+            this.messageType = 'loading';
+            this.consoleLines = [];
+            this.results = [];
+            this.progress = 0;
+            this.progressLabel = '准备中...';
+
+            try {
+                const res = await fetch('/api/infer', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ video: this.currentVideo, labels: this.labels })
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    this.addConsole('=== 推理开始 ===', 'info');
+                    if (data.stdout) {
+                        const lines = data.stdout.split('\n');
+                        let segmentCurrent = 0;
+                        let segmentTotal = 0;
+                        lines.forEach(line => {
+                            const segMatch = line.match(/正在处理第\s*(\d+)\/(\d+)\s*段/);
+                            if (segMatch) {
+                                segmentCurrent = parseInt(segMatch[1]);
+                                segmentTotal = parseInt(segMatch[2]);
+                                this.progress = Math.round((segmentCurrent / segmentTotal) * 100);
+                                this.progressLabel = `正在推理第 ${segmentCurrent}/${segmentTotal} 段`;
+                            }
+                            if (line.includes('ERROR') || line.includes('Error') || line.includes('错误')) {
+                                this.addConsole(line, 'error');
+                            } else if (line.includes('Warning') || line.includes('警告')) {
+                                this.addConsole(line, 'warn');
+                            } else if (line.includes('段结果:') || line.includes('detected') || line.includes('模型输出')) {
+                                this.addConsole(line, 'info');
+                            } else if (line.trim()) {
+                                this.addConsole(line);
+                            }
+                        });
+                    } else {
+                        this.addConsole('(stdout 为空)', 'warn');
+                    }
+                    if (data.stderr) {
+                        this.addConsole('=== stderr ===', 'warn');
+                        data.stderr.split('\n').forEach(line => {
+                            if (line.trim()) this.addConsole(line, 'error');
+                        });
+                    }
+                    this.addConsole('=== 推理结束 ===', 'info');
+                    this.progress = 100;
+                    this.progressLabel = '推理完成';
+                    this.message = '推理完成！';
+                    this.messageType = 'success';
+                    await this.loadResults(this.currentVideoName);
+                    await this.fetchVideos();
+                } else {
+                    this.message = data.error || '推理失败';
+                    this.messageType = 'error';
+                    this.addConsole(data.error || '推理失败', 'error');
+                }
+            } catch (e) {
+                this.message = '请求失败: ' + e.message;
+                this.messageType = 'error';
+                this.addConsole('请求失败: ' + e.message, 'error');
+            } finally {
+                this.inferring = false;
+                setTimeout(() => { this.progress = 0; this.progressLabel = ''; }, 2000);
+            }
+        }
+    }
+}).mount('#app');
+</script>
+</body>
+</html>
